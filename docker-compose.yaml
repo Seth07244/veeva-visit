@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: veeva
+      POSTGRES_PASSWORD: veeva
+      POSTGRES_DB: veeva_visit
+    ports:
+      - "54329:5432"
+    volumes:
+      - veeva_visit_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veeva -d veeva_visit"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+  app:
+    build: .
+    ports:
+      - "8090:8090"
+    environment:
+      DATABASE_URL: postgres://veeva:veeva@db:5432/veeva_visit
+      PORT: "8090"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  veeva_visit_pg:
