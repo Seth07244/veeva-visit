@@ -30,29 +30,64 @@
 | 医院下拉改变后医生列表 | 医院变化后重建科室，再重建医生 | `public/app.js`，提交 `91f2a00` |
 | 看板归哪个月 | 按计划时间的东八区月份，左闭右开 | `src/month.js`，提交 `eee05de` |
 
-## 2. AI 纠偏亮点案例
+## 2. AI 纠偏案例
 
-仓库里没有单独的纠错提交。
+仓库里没有单独的纠错提交，所以不写成「先错后改」。这次最容易走偏的是签退的覆盖：覆盖的是结果，不是证据。第一版就把这条定下来，没有留下错误版本。
 
-先前写过两个案例：一个是列表接口对 `month=2026-13` 返回 500、看板返回 400；另一个是签退重算时丢掉签到偏离。对照提交后，这两段都不能当作已发生的修复：
+### 2.1 容易写错的代码
 
-- `170c12d` 引入路由时，`GET /api/visits` 和 `GET /api/dashboard` 都已经用 `try/catch` 把 `monthRange` 的错误包装成 400。历史里没有返回 500 的那一版。
-- `eee05de` 引入合规函数时，签退已经用签到坐标、签退坐标和两段时间一起重算。历史里没有「只看签退、清掉签到偏离」的那一版。
+签到只算了位置，就把人在院内直接写成「合规」：
 
-因此这里不补写错误代码，也不把设计取舍写成一次调试。上面的决定以对应提交里的文件为准。
+```javascript
+const offsite = checkInDistanceMeters > 500;
+return {
+  checkInDistanceMeters,
+  complianceStatus: offsite ? 'abnormal' : 'normal',
+  reasons: offsite ? ['CHECK_IN_OFFSITE'] : [],
+};
+```
 
-## 3. 全程会话导出和 git history
+签退看起来做了覆盖，其实只重算了时长和签退坐标。签到坐标不在输入里。签到偏离过，签退回到院内、停留也够时，新算出的原因是空的，于是整段结论被写成 `normal`，`CHECK_IN_OFFSITE` 被清掉。
+
+### 2.2 为什么难发现
+
+三条原因一起命中的测试看不出这个问题。全程合规的测试也看不出。只有一条不对称样本会暴露：签到在院外约 800 米，签退回到医院坐标，停留 20 分钟。界面显示「合规」，库里的签到距离仍是 799.1 米。
+
+另一头也一样。人在院内签到、还没签退，看板的「合规」已经加 1。时长还没发生，系统却提前给了结论。
+
+### 2.3 怎么定下来
+
+签退不许读上一次的状态或原因码。用留下的签到坐标、签退坐标和两段时间整段重算，结果覆盖状态字段。签到偏离过，重算时 `CHECK_IN_OFFSITE` 仍要命中。人在院内签到只能写 `pending`，不能写 `normal`。
+
+### 2.4 落在仓库里
+
+实现和测试都在提交 `eee05de`：
+
+- 实现：`src/compliance.js` 的 `evaluateCheckIn`、`evaluateCompliance`
+- 测试：`src/compliance.test.js` 的「签到只结算位置」和「签退同时核算时长和两处位置」
+
+种子里林可拜访韩淑君、舒糖达就是这条不对称样本：签到偏离、签退在院内、停留 20 分钟，最终是 `abnormal`，原因只有 `CHECK_IN_OFFSITE`。正好 300 秒、正好 500 米的边界没有放宽。
+
+## 3. 全程会话导出和 git 提交
 
 会话记录在 [AI会话导出.md](./AI会话导出.md)，只包括已经进仓库的问题和决定。
 
-查看提交：
+下面是 `git log` 里的全部提交，从早到晚。哈希、时间和说明都以仓库为准。
+
+| 提交 | 时间 | 说明 | 主要文件 |
+| --- | --- | --- | --- |
+| `eee05de` | 2026-10-14 12:49 | 把合规规则做成纯函数，方便单独验证时长和距离边界。 | `src/compliance.js`、`src/compliance.test.js`、`src/month.js`、`src/month.test.js`、`src/schema.sql`、`src/visit-rules.js`、`src/visit-rules.test.js` |
+| `170c12d` | 2026-10-14 12:49 | 把计划、签到、签退和拜访记录接成一条会校验状态的接口。 | `src/routes.js`、`src/server.js`、`src/db.js`、`src/present.js`、`src/seed.js`、`package.json` |
+| `91f2a00` | 2026-10-14 12:49 | 加上桌面页面，用手工坐标模拟签到签退，并按产品看月度次数。 | `public/app.js`、`public/index.html`、`public/styles.css` |
+| `3e6db43` | 2026-10-14 12:49 | 用 docker compose 把 Postgres 和应用一起启动。 | `docker-compose.yaml`、`Dockerfile`、`README.md`、`.dockerignore`、`.env.example`、`.gitignore` |
+| `09aa057` | 2026-10-15 19:38 | 补上与现有提交一致的报告、会话记录和演示录屏。安装过程、交付说明，以及仓库里没有对应错误版本的纠偏故事不再写入。 | `docs/AI协同开发报告.md`、`docs/AI会话导出.md`、`docs/demo.webm`、`.gitignore` |
+
+在仓库根目录可以再核对：
 
 ```powershell
 git log --oneline
 git log -p --stat
 ```
-
-当前顺序是：合规规则与测试，接口，页面，Docker 编排，然后是本报告和会话记录。
 
 ## 4. 应用 Demo 录屏
 
